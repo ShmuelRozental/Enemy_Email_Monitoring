@@ -1,4 +1,5 @@
 from kafka import KafkaConsumer
+import os
 import json
 
 
@@ -7,7 +8,7 @@ suspicious_keywords = {'suspicious', 'fraud', 'scam'}
 
 consumer = KafkaConsumer(
     'suspicious_emails',
-    bootstrap_servers='kafka:9092',
+    bootstrap_servers=(os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")),
     value_deserializer=lambda v: json.loads(v.decode('utf-8'))
 )
 
