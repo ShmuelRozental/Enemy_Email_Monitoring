@@ -1,9 +1,12 @@
-version: '3.8'
+
+
 services:
   email_dispatcher:
     build: ./email-dispatcher  
     ports:
       - "5000:5000"
+    networks:
+      - my_network
 
   email_processor:
     build: ./email-processor  
@@ -13,6 +16,8 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
     depends_on:
       - kafka
+    networks:
+      - my_network
 
   suspicious_content_consumer:
     build: ./suspicious-content-consumer
@@ -20,6 +25,8 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
     depends_on:
       - kafka
+    networks:
+      - my_network
 
   all_messages_consumer:
     build: ./mdb-consumer
@@ -29,6 +36,8 @@ services:
     depends_on:
       - kafka
       - mongo
+    networks:
+      - my_network
 
   kafka:
     image: 'bitnami/kafka:latest'
@@ -36,15 +45,25 @@ services:
       - KAFKA_BROKER_ID=1
       - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
-      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092
+      - KAFKA_LISTENERS=PLAINTEXT://kafka:9092
       - KAFKA_CREATE_TOPICS=all_emails:1:1,suspicious_emails:2:1
     depends_on:
       - zookeeper
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list"]
+      interval: 30s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+    networks:
+      - my_network
 
   zookeeper:
     image: 'bitnami/zookeeper:latest'
     environment:
       - ALLOW_ANONYMOUS_LOGIN=yes
+    networks:
+      - my_network
 
   mongo:
     image: 'mongo:latest'
@@ -52,4 +71,10 @@ services:
       - "27017:27017"
     environment:
       - MONGO_INITDB_ROOT_USERNAME=root
-      - MONGO_INITDB_ROOT_PASSWORD=example
+      - MONGO_INITDB_ROOT_PASSWORD=1234
+    networks:
+      - my_network
+
+networks:
+  my_network:
+    driver: bridge
