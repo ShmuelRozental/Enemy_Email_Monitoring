@@ -1,41 +1,104 @@
 
+# services:
 
+#   zookeeper:
+#       image: 'bitnami/zookeeper:latest'
+#       environment:
+#         - ALLOW_ANONYMOUS_LOGIN=yes
+#       networks:
+#         - my_network
+
+#   kafka:
+#     image: 'bitnami/kafka:latest'
+#     environment:
+#       - KAFKA_BROKER_ID=1
+#       - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+#       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+#       - KAFKA_LISTENERS=PLAINTEXT://kafka:9092
+#       - KAFKA_CREATE_TOPICS=all_emails:1:1,suspicious_emails:2:1
+#     depends_on:
+#       - zookeeper
+#     healthcheck:
+#       test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list"]
+#       interval: 30s
+#       retries: 5
+#       start_period: 30s
+#       timeout: 10s
+#     networks:
+#       - my_network
+ 
+
+#   mongo:
+#     image: 'mongo:latest'
+#     ports:
+#       - "27017:27017"
+#     environment:
+#       - environment:
+#       - MONGO_URI=mongodb://mongo:27017
+#       - MONGO_INITDB_ROOT_PASSWORD=1234
+#     networks:
+#       - my_network
+
+#   email_processor:
+#       build: ./email-processor  
+#       ports:
+#         - "5001:5001"
+#       environment:
+#         - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+#       depends_on:
+#         - kafka
+#       networks:
+#         - my_network
+
+#   email_dispatcher:
+#     build: ./email-dispatcher  
+#     ports:
+#       - "5000:5000"
+#     depends_on:
+#       - email_processor
+#     networks:
+#       - my_network
+
+ 
+
+#   suspicious_content_consumer:
+#     build: ./suspicious-content-consumer
+#     environment:
+#       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+#     depends_on:
+#       - kafka
+#     networks:
+#       - my_network
+
+#   all_messages_consumer:
+#     build: ./mdb-consumer
+#     environment:
+#       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+#       - MONGO_URI=mongodb://mongo:27017
+#     depends_on:
+#       - kafka
+#       - mongo
+#     networks:
+#       - my_network
+ 
+# networks:
+#   my_network:
+#     driver: bridge
+
+
+version: '3.8'
+
+x-environment-variables: &default-env-vars
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  MONGO_URI: mongodb://mongo:27017
+  KAFKA_TOPIC: all_emails
+  MONGO_DB: email_monitor
+  MONGO_COLLECTION: all_messages
 services:
-  email_dispatcher:
-    build: ./email-dispatcher  
-    ports:
-      - "5000:5000"
-    networks:
-      - my_network
-
-  email_processor:
-    build: ./email-processor  
-    ports:
-      - "5001:5001"
+  zookeeper:
+    image: 'bitnami/zookeeper:latest'
     environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-    depends_on:
-      - kafka
-    networks:
-      - my_network
-
-  suspicious_content_consumer:
-    build: ./suspicious-content-consumer
-    environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-    depends_on:
-      - kafka
-    networks:
-      - my_network
-
-  all_messages_consumer:
-    build: ./mdb-consumer
-    environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - MONGO_URI=mongodb://mongo:27017
-    depends_on:
-      - kafka
-      - mongo
+      - ALLOW_ANONYMOUS_LOGIN=yes
     networks:
       - my_network
 
@@ -58,13 +121,6 @@ services:
     networks:
       - my_network
 
-  zookeeper:
-    image: 'bitnami/zookeeper:latest'
-    environment:
-      - ALLOW_ANONYMOUS_LOGIN=yes
-    networks:
-      - my_network
-
   mongo:
     image: 'mongo:latest'
     ports:
@@ -72,6 +128,61 @@ services:
     environment:
       - MONGO_INITDB_ROOT_USERNAME=root
       - MONGO_INITDB_ROOT_PASSWORD=1234
+    networks:
+      - my_network
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+
+  postgres:
+    image: postgres:latest
+    environment:
+      - POSTGRES_DB=email_monitor
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    networks:
+      - my_network
+
+      
+  email_processor:
+    build: ./email-processor
+    ports:
+      - "5001:5001"
+    environment:
+      <<: *default-env-vars
+    depends_on:
+      - kafka
+    networks:
+      - my_network
+
+  email_dispatcher:
+    build: ./email-dispatcher
+    ports:
+      - "5000:5000"
+    depends_on:
+      - email_processor
+    networks:
+      - my_network
+
+  suspicious_content_consumer:
+    build: ./suspicious-content-consumer
+    environment:
+      <<: *default-env-vars
+    depends_on:
+      - kafka
+    networks:
+      - my_network
+
+  all_messages_consumer:
+    build: ./mdb-consumer
+    environment:
+      <<: *default-env-vars
+    depends_on:
+      - kafka
+      - mongo
     networks:
       - my_network
 
