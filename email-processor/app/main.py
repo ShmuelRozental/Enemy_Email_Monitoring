@@ -5,9 +5,10 @@ import os
 
 app = Flask(__name__)
 
+print(os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092"))
 
 producer = KafkaProducer(
-    bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafkf:9092"),
+    bootstrap_servers=(os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")),
     value_serializer=lambda v: json.dumps(v).encode('utf-8')
 )
 
