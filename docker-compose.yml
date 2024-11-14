@@ -1,0 +1,55 @@
+version: '3.8'
+services:
+  email_dispatcher:
+    build: ./email-dispatcher  
+    ports:
+      - "5000:5000"
+
+  email_processor:
+    build: ./email-processor  
+    ports:
+      - "5001:5001"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      - kafka
+
+  suspicious_content_consumer:
+    build: ./suspicious-content-consumer
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+    depends_on:
+      - kafka
+
+  all_messages_consumer:
+    build: ./mdb-consumer
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - MONGO_URI=mongodb://mongo:27017
+    depends_on:
+      - kafka
+      - mongo
+
+  kafka:
+    image: 'bitnami/kafka:latest'
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092
+      - KAFKA_CREATE_TOPICS=all_emails:1:1,suspicious_emails:2:1
+    depends_on:
+      - zookeeper
+
+  zookeeper:
+    image: 'bitnami/zookeeper:latest'
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+
+  mongo:
+    image: 'mongo:latest'
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=example
