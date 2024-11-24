@@ -1,96 +1,7 @@
 
-# services:
-
-#   zookeeper:
-#       image: 'bitnami/zookeeper:latest'
-#       environment:
-#         - ALLOW_ANONYMOUS_LOGIN=yes
-#       networks:
-#         - my_network
-
-#   kafka:
-#     image: 'bitnami/kafka:latest'
-#     environment:
-#       - KAFKA_BROKER_ID=1
-#       - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
-#       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
-#       - KAFKA_LISTENERS=PLAINTEXT://kafka:9092
-#       - KAFKA_CREATE_TOPICS=all_emails:1:1,suspicious_emails:2:1
-#     depends_on:
-#       - zookeeper
-#     healthcheck:
-#       test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list"]
-#       interval: 30s
-#       retries: 5
-#       start_period: 30s
-#       timeout: 10s
-#     networks:
-#       - my_network
- 
-
-#   mongo:
-#     image: 'mongo:latest'
-#     ports:
-#       - "27017:27017"
-#     environment:
-#       - environment:
-#       - MONGO_URI=mongodb://mongo:27017
-#       - MONGO_INITDB_ROOT_PASSWORD=1234
-#     networks:
-#       - my_network
-
-#   email_processor:
-#       build: ./email-processor  
-#       ports:
-#         - "5001:5001"
-#       environment:
-#         - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-#       depends_on:
-#         - kafka
-#       networks:
-#         - my_network
-
-#   email_dispatcher:
-#     build: ./email-dispatcher  
-#     ports:
-#       - "5000:5000"
-#     depends_on:
-#       - email_processor
-#     networks:
-#       - my_network
-
- 
-
-#   suspicious_content_consumer:
-#     build: ./suspicious-content-consumer
-#     environment:
-#       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-#     depends_on:
-#       - kafka
-#     networks:
-#       - my_network
-
-#   all_messages_consumer:
-#     build: ./mdb-consumer
-#     environment:
-#       - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-#       - MONGO_URI=mongodb://mongo:27017
-#     depends_on:
-#       - kafka
-#       - mongo
-#     networks:
-#       - my_network
- 
-# networks:
-#   my_network:
-#     driver: bridge
-
-
-version: '3.8'
-
 x-environment-variables: &default-env-vars
   KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-  MONGO_URI: mongodb://mongo:27017
+  MONGO_URI: mongodb://root:1234@mongo:27017/email_monitor?authSource=admin
   KAFKA_TOPIC: all_emails
   MONGO_DB: email_monitor
   MONGO_COLLECTION: all_messages
@@ -99,6 +10,8 @@ services:
     image: 'bitnami/zookeeper:latest'
     environment:
       - ALLOW_ANONYMOUS_LOGIN=yes
+      - ZOOKEEPER_CLIENT_PORT= 2181
+      - ZOOKEEPER_TICK_TIME=2000
     networks:
       - my_network
 
@@ -108,16 +21,33 @@ services:
       - KAFKA_BROKER_ID=1
       - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
       - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
-      - KAFKA_LISTENERS=PLAINTEXT://kafka:9092
-      - KAFKA_CREATE_TOPICS=all_emails:1:1,suspicious_emails:2:1
+      - KAFKA_LISTENERS=PLAINTEXT://0.0.0.0:9092
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT
+      - KAFKA_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+      - KAFKA_AUTHORIZER_CLASS_NAME=kafka.security.authorizer.AclAuthorizer
+      - KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND="true"
+      - KAFKA_SUPER_USERS=User:admin
     depends_on:
       - zookeeper
     healthcheck:
-      test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list"]
-      interval: 30s
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/kafka/9092 && echo 'Success' || echo 'Failure'"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-      start_period: 30s
-      timeout: 10s
+      start_period: 60s
+    networks:
+      - my_network
+  
+  kafka-init:
+    image: 'bitnami/kafka:latest'
+    container_name: kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./init-topics.sh:/init-topics.sh
+    entrypoint: ["bash", "/init-topics.sh"]
     networks:
       - my_network
 
@@ -131,9 +61,10 @@ services:
     networks:
       - my_network
     healthcheck:
-      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "mongosh", "--username", "root", "--password", "1234", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
       retries: 5
 
 
@@ -142,49 +73,80 @@ services:
     environment:
       - POSTGRES_DB=email_monitor
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
+      - POSTGRES_PASSWORD=1234
     networks:
       - my_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d email_monitor"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
 
-      
-  email_processor:
-    build: ./email-processor
+          
+
+  email_router_producer:
+    build: ./email_router_producer
     ports:
       - "5001:5001"
     environment:
       <<: *default-env-vars
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
     networks:
       - my_network
 
-  email_dispatcher:
-    build: ./email-dispatcher
+  email_generator:
+    build: ./email_generator
     ports:
       - "5000:5000"
     depends_on:
-      - email_processor
+      - email_router_producer
     networks:
       - my_network
 
-  suspicious_content_consumer:
-    build: ./suspicious-content-consumer
+  suspicious_emails_processor:
+    build: ./suspicious_emails_processor
     environment:
       <<: *default-env-vars
+      SUSPICIOUS_KEYWORDS: '{"hostage": "messages.hostage", "explosive": "messages.explosive"}'
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     networks:
       - my_network
 
-  all_messages_consumer:
-    build: ./mdb-consumer
+  emails_mdb_consumer:
+    build: ./emails_mdb_consumer
     environment:
       <<: *default-env-vars
     depends_on:
-      - kafka
-      - mongo
+      kafka:
+          condition: service_healthy
+      mongo:
+          condition: service_healthy
+      email_router_producer:
+          condition: service_started
     networks:
       - my_network
+
+  suspicious_email_consumer:
+    build: ./suspicious_email_consumer  
+    environment:
+      <<: *default-env-vars
+      DATABASE_URL: postgresql://postgres:1234@postgres/email_monitor
+      SUSPICIOUS_KEYWORDS: '{"hostage": "messages.hostage", "explosive": "messages.explosive"}'
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - my_network
+
 
 networks:
   my_network:
